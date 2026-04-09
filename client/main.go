@@ -73,24 +73,51 @@ func main() {
 	fmt.Printf("HandshakeMessage.MessageType: %v\n", HandshakeMessage.MessageType)
 	fmt.Printf("HandshakeMessage.Length: %v\n", HandshakeMessage.Length)
 
-	certs := ParseCertificates(bytes.NewReader(HandshakeMessage.Payload))
+	Certifficate := Certifficate{}
+	certs := Certifficate.ParseCertificates(bytes.NewReader(HandshakeMessage.Payload))
 	for _, cert := range certs {
 		fmt.Printf("cert.Issuer.Country: %v\n", cert.Issuer.Country)
 	}
-	// and the most important thing in TLS server sends certificate chain 
+	// and the most important thing in TLS server sends certificate chain not only one single certificate but multiple chain of certificates
 
 	fmt.Println("\n/////////// Third Record ////////////////////\n")
 	TLSRecord.Parse(respReader)
 	HandshakeMessage.Parse(bytes.NewReader(TLSRecord.Payload))
 	fmt.Printf("HandshakeMessage.MessageType: %v\n", HandshakeMessage.MessageType)
 	fmt.Printf("HandshakeMessage.Length: %v\n", HandshakeMessage.Length)
-	
+
 	//now the server has sent the three records ServerHello, Certificate,  and ServerHelloDone;
 	//it's client to sent back the ClientKey,
-
-	conn.Write(TLSRecordBytes)
-
+	// ClientKeyExchangePayloadB := Certifficate.ClientKeyExchangePayloadB()
+	// WrapHandshakeB := WrapHandshake(ClientKeyExchangePayloadB)
+	// TLSRecordClientKeyBytes := TLSRecord.Serialize(WrapHandshakeB)
+	// conn.Write(TLSRecordClientKeyBytes)
+	// changeCipherSpec := []byte{0x14, 0x03, 0x03, 0x00, 0x01, 0x01}
+	// conn.Write(changeCipherSpec)
+	// handshakeHash := sha256.New()
+	// handshakeHash.Write(clientHelloHandshakeBytes)
+	// handshakeHash.Write(serverHelloHandshakeBytes)
+	// handshakeHash.Write(certificateHandshakeBytes)
+	// handshakeHash.Write(serverHelloDoneHandshakeBytes)
+	// handshakeHash.Write(clientKeyExchangeHandshakeBytes)
+	// handshakeDigest := handshakeHash.Sum(nil)
+	// masterSecret := MasterSecret()
+	// verifyData := prf(masterSecret, "client finished", handshakeDigest, 12)
 }
+// sOme lasts parts is still to implement will implement in furure this much is enough for now 
+//AFTER SERVER HELLO DONE
+// Client                              Server
+//   │                                   │
+//   │──── ClientKeyExchange ───────────▶│  (0x16 handshake, MessageType 0x10)
+//   │──── ChangeCipherSpec ────────────▶│  (0x14, payload 0x01)
+//   │──── Finished ────────────────────▶│  (0x16 handshake, encrypted)
+
+// The TLS record content types are:
+// 0x14 → ChangeCipherSpec  (its own type)
+// 0x15 → Alert
+// 0x16 → Handshake
+// 0x17 → ApplicationData
+// Only 0x16 records contain a HandshakeMessage wrapper inside
 
 // 0  → HelloRequest       (rare / mostly obsolete)
 // 1  → ClientHello        (client → server)
