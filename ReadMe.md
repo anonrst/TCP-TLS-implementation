@@ -1,22 +1,21 @@
 # TLS 1.2 (Transport Layer Security)
 
-> This document covers a TLS 1.2 implementation using the cipher suite `TLS_RSA_WITH_AES_256_CBC_SHA`.
+> This document covers a TLS 1.2 implementation.
 
 TLS is built on top of TCP. Its main purpose is to encrypt the raw data sent over TCP so that no one can read it during transmission. Its job is not to organize data packets — that is TCP's responsibility.
 
-To establish a secure connection, TLS performs a series of handshakes between client and server. Every handshake message is wrapped inside a `HandshakeMessage`, and that `HandshakeMessage` is wrapped inside a `TLSRecord`. This makes `TLSRecord` the outermost wrapper — analogous to an HTTP request envelope.
-
+To establish a secure connection, TLS performs a series of handshakes between client and server. Every handshake message is wrapped inside a `HandshakeMessage`, and that `HandshakeMessage` is wrapped inside a `TLSRecord`. This makes `TLSRecord` the outermost wrapper of every request.
 ---
 
 ## Serialization
 
-Before any data is transmitted, it must be serialized — converted from structured objects into raw bytes, a universal format that any language or runtime can parse and reconstruct.
+Before any data is transmitted, it must be serialized means converted from structured objects into raw bytes, becuase TCP supports raw bytes to ransfer.
 
 ---
 
 ## TLS Record
 
-Every message sent during a TLS session — whether a handshake, an alert, or encrypted application data — is sent inside a `TLSRecord`. Think of it as the envelope around every transmission: it tells the receiver what type of content is inside, which protocol version is being used, how long the payload is, and then carries the payload itself.
+Every message sent during a TLS  message is sent inside a `TLSRecord`. Think of it as the envelope around every transmission: it tells the receiver what type of content is, protocol version and length of payload in bytes, and then carries the payload itself.
 
 ```go
 type TLSRecord struct {
@@ -27,7 +26,7 @@ type TLSRecord struct {
 }
 ```
 
-The `ContentType` field tells the receiver how to interpret the payload:
+The `ContentType` field in every TLSRecord tells the receiver how to interpret the payload:
 
 | Hex    | Content Type     |
 |--------|------------------|
@@ -37,12 +36,6 @@ The `ContentType` field tells the receiver how to interpret the payload:
 | `0x17` | ApplicationData  |
 
 Only `TLSRecord`s with `ContentType = 0x16` contain a `HandshakeMessage` inside their payload. Other content types — like `ChangeCipherSpec` — carry their payload directly, without a `HandshakeMessage` wrapper.
-
-For example, a raw `ChangeCipherSpec` record looks like this:
-
-```
-0x14 0x03 0x03 0x00 0x01 0x01
-```
 
 Breaking it down: `0x14` is the `ContentType` (ChangeCipherSpec), `0x03 0x03` is the protocol version (TLS 1.2), `0x00 0x01` is the payload length (1 byte), and `0x01` is the payload itself.
 
@@ -119,7 +112,7 @@ type ServerHello struct {
 
 ### Cipher Suite
 
-A `CipherSuite` is a combination of algorithms that both client and server agree to use for the session. The client sends a list of supported cipher suites in `ClientHello`, and the server picks one and echoes it back in `ServerHello`.
+A `CipherSuite` is a combination of algorithms that both client and server agree to use for both asymetric and sysmetric session setup. The client sends a list of supported cipher suites in `ClientHello`, and the server picks one and echoes it back in `ServerHello`.
 
 This implementation uses `TLS_RSA_WITH_AES_256_CBC_SHA`, which breaks down as:
 
