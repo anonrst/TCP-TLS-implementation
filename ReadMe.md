@@ -1,92 +1,189 @@
-# TLS
+# TLS 1.2 (Transport Layer Security)
 
-First, TLS stands for Transport Layer Security. Its job is to secure data in packet transmission from being leaked to attackers. However, its job isn't to organize DataPackets—TCP does this.
+> This document covers a TLS 1.2 implementation using the cipher suite `TLS_RSA_WITH_AES_256_CBC_SHA`.
 
-So it's built on top of TCP or UDP and some other protocols. Before sending a single data packet over the internet, what TCP does is establish a secure connection.
+TLS is built on top of TCP. Its main purpose is to encrypt the raw data sent over TCP so that no one can read it during transmission. Its job is not to organize data packets — that is TCP's responsibility.
 
-For establishing this connection, both server and client have to exchange keys and decide on a cipher suite they both will be using. A cipher suite is just like an algorithm that both (server and client) will agree to use in their encryption.
+To establish a secure connection, TLS performs a series of handshakes between client and server. Every handshake message is wrapped inside a `HandshakeMessage`, and that `HandshakeMessage` is wrapped inside a `TLSRecord`. This makes `TLSRecord` the outermost wrapper — analogous to an HTTP request envelope.
 
-Let's understand serialization. Serialization is converting objects into any universal format that any language could understand—this could be JSON, YAML, but in this case it's raw bytes.
+---
 
-Another thing in TLS: every Message Record that TLS sends has a MessageType that represents what the server is sending or requesting.
- 0  → HelloRequest       (rare / mostly obsolete)
- 1  → ClientHello        (client → server)
- 2  → ServerHello        (server → client)
- 4  → NewSessionTicket   (TLS 1.3 session reuse)
- 8  → EncryptedExtensions(TLS 1.3)
- 11 → Certificate        (server/client cert)
- 12 → ServerKeyExchange  (TLS 1.2 and below)
- 13 → CertificateRequest (server asks client cert)
- 14 → ServerHelloDone    (TLS 1.2 end of server hello)
- 15 → CertificateVerify  (prove ownership of cert)
- 16 → ClientKeyExchange  (TLS 1.2 key exchange)
- 20 → Finished           (both sides)
+## Serialization
 
-type Extension struct {
-	Type uint16
-	Data []byte
+Before any data is transmitted, it must be serialized — converted from structured objects into raw bytes, a universal format that any language or runtime can parse and reconstruct.
+
+---
+
+## TLS Record
+
+Every message sent during a TLS session — whether a handshake, an alert, or encrypted application data — is sent inside a `TLSRecord`. Think of it as the envelope around every transmission: it tells the receiver what type of content is inside, which protocol version is being used, how long the payload is, and then carries the payload itself.
+
+```go
+type TLSRecord struct {
+    ContentType     byte
+    ProtocolVersion [2]byte
+    Length          uint16
+    Payload         []byte
 }
+```
 
-type ServerHello struct {
-	ProtocolVersion   [2]byte
-	Random            Random
-	SessionID         []byte
-	CipherSuite       uint16
-	CompressionMethod byte
-	Extension         []Extension
+The `ContentType` field tells the receiver how to interpret the payload:
+
+| Hex    | Content Type     |
+|--------|------------------|
+| `0x14` | ChangeCipherSpec |
+| `0x15` | Alert            |
+| `0x16` | Handshake        |
+| `0x17` | ApplicationData  |
+
+Only `TLSRecord`s with `ContentType = 0x16` contain a `HandshakeMessage` inside their payload. Other content types — like `ChangeCipherSpec` — carry their payload directly, without a `HandshakeMessage` wrapper.
+
+For example, a raw `ChangeCipherSpec` record looks like this:
+
+```
+0x14 0x03 0x03 0x00 0x01 0x01
+```
+
+Breaking it down: `0x14` is the `ContentType` (ChangeCipherSpec), `0x03 0x03` is the protocol version (TLS 1.2), `0x00 0x01` is the payload length (1 byte), and `0x01` is the payload itself.
+
+---
+
+## Handshake Message
+
+When a `TLSRecord` has `ContentType = 0x16`, its payload contains a `HandshakeMessage`. This is a second layer of wrapping that identifies the specific type of handshake step being performed and carries its data.
+
+```go
+type HandshakeMessage struct {
+    MessageType byte
+    Length      [3]byte
+    Payload     []byte
+}
+```
+
+The nesting looks like this:
+
+```
+TLSRecord
+    └── HandshakeMessage
+            └── ClientHello / ServerHello / Certificate / ... (actual payload)
+```
+
+### Handshake Message Types
+
+The table below covers only the message types relevant to this TLS 1.2 RSA implementation. TLS 1.3-only types (`NewSessionTicket`, `EncryptedExtensions`) and mutual-TLS types (`CertificateRequest`, `CertificateVerify`) are intentionally excluded.
+
+| Value | Message Type      | Direction / Note                                                              |
+|-------|-------------------|-------------------------------------------------------------------------------|
+| 0     | HelloRequest      | Rare / mostly obsolete                                                        |
+| 1     | ClientHello       | Client → Server                                                               |
+| 2     | ServerHello       | Server → Client                                                               |
+| 11    | Certificate       | Server sends its certificate chain after ServerHello                          |
+| 12    | ServerKeyExchange | DHE/ECDHE suites only — **not sent in RSA key exchange (this impl)**          |
+| 14    | ServerHelloDone   | Signals the end of the server's hello messages                                |
+| 16    | ClientKeyExchange | Client sends the RSA-encrypted pre-master secret                              |
+| 20    | Finished          | Both sides — first message protected by the negotiated session keys           |
+
+---
+
+## Go Structs
+
+```go
+type Extension struct {
+    Type uint16
+    Data []byte
 }
 
 type Random struct {
-	UnixTime    uint32
-	RandomBytes [28]byte
+    UnixTime    uint32
+    RandomBytes [28]byte
 }
-
 
 type ClientHello struct {
-	ProtocolVersion    [2]byte
-	Random             Random
-	SessionID          []byte
-	CipherSuites       []uint16
-	CompressionMethods []byte
-	Extensions         []Extension
+    ProtocolVersion    [2]byte
+    Random             Random
+    SessionID          []byte
+    CipherSuites       []uint16
+    CompressionMethods []byte
+    Extensions         []Extension
 }
-# TLS record is the structure that every request or response between client and server for establishing this secure connection has to sends in, so this mean that in every request TLSRecord is like Wrapper like headers and body in HTTPRequest
-type TLSRecord struct { //so think this is the actual HTTPRequest and it's has body and headers, and think ContentType is also a header andif header is HandshakeMessage this means that it's body is going to have a wrapper of HandshakeMessage so the contenttype could be like 
-	ContentType     byte
-	ProtocolVersion [2]byte
-	Length          uint16
-	Payload         []byte
+
+type ServerHello struct {
+    ProtocolVersion   [2]byte
+    Random            Random
+    SessionID         []byte
+    CipherSuite       uint16
+    CompressionMethod byte
+    Extension         []Extension
 }
-# so this is the struct inside every TLSRecord storing the type of message and that message.
-type HandshakeMessage struct {
-	MessageType byte
-	Length      [3]byte
-	Payload     []byte
-}
-// Don't be confused if HandshakeMessage is in every TLSRecord—what makes it necessary to wrap HandshakeMessage in TLSRecord? Why not send only HandshakeMessage? Just think of HandshakeMessage as the Body in an HTTPRequest, which isn't necessary every time in every Record. Let's take an example of sending ChangeCipherSpec to the server, which looks like this: `changeCipherSpec := []byte{0x14, 0x03, 0x03, 0x00, 0x01, 0x01}`. This is a TLSRecord where the first byte is `0x14`, which means the Content Type. 
-<!-- A complete TLS 1.2 handshake requires this full exchange:
-first the client will start the setting this secure connection and in all of this handshake meaning is same as communicating via request and responses.
+```
+
+### Cipher Suite
+
+A `CipherSuite` is a combination of algorithms that both client and server agree to use for the session. The client sends a list of supported cipher suites in `ClientHello`, and the server picks one and echoes it back in `ServerHello`.
+
+This implementation uses `TLS_RSA_WITH_AES_256_CBC_SHA`, which breaks down as:
+
+| Segment       | Algorithm           | Role                                                                                  |
+|---------------|---------------------|---------------------------------------------------------------------------------------|
+| `RSA`         | RSA                 | Key exchange — the client encrypts the pre-master secret with the server's public key |
+| `AES_256_CBC` | AES-256 in CBC mode | Symmetric cipher — encrypts all application data after `ChangeCipherSpec`             |
+| `SHA`         | HMAC-SHA1           | MAC algorithm — verifies the integrity of every encrypted record                      |
+
+### SessionID and Session Resumption
+
+The `SessionID` field in both `ClientHello` and `ServerHello` supports session resumption. On the first connection the client sends an empty `SessionID`. The server assigns one and returns it in `ServerHello`. If the same client reconnects later and sends that `SessionID` in a new `ClientHello`, the server can recognize it, skip the full handshake, and directly reuse the previously negotiated master secret — avoiding the expensive RSA decryption step again.
+
+---
+
+## The TLS 1.2 Handshake
+
+### Step 1 — ClientHello
+
+The client initiates the handshake by sending a `ClientHello` record. This contains a 32-byte `Random` value (4 bytes Unix timestamp + 28 random bytes) and a list of cipher suites the client supports.
+
+### Step 2 — Server responds with three records back-to-back
+
+The server replies with three `TLSRecord`s sent in a single response:
+
+1. **ServerHello** — Contains the server's chosen cipher suite and its own 32-byte `Random` value.
+2. **Certificate** — Contains the server's certificate chain. The first certificate in the chain holds the server's public key. Every certificate in the chain is signed by the one above it, up to a trusted root.
+3. **ServerHelloDone** — Signals that the server is done sending its handshake messages and it is now the client's turn.
+
+### Step 3 — ClientKeyExchange
+
+The client takes the server's public key from the first certificate and uses it to encrypt a 48-byte **pre-master secret**. This encrypted value is sent to the server inside a `ClientKeyExchange` handshake record. Only the server can decrypt it using its corresponding private key.
+
+At this point, both sides have the pre-master secret. They each independently derive the same 48-byte **master secret** from it. From the master secret, both sides derive a 136-byte **key block** containing all the session keys needed to encrypt and verify data for the rest of the connection.
+
+### Step 4 — ChangeCipherSpec (Client)
+
+The client sends a `ChangeCipherSpec` record (`ContentType = 0x14`). This signals that the client is switching from asymmetric encryption — which uses the server's public/private key pair — to symmetric encryption using `AES_256_CBC`, where a single shared session key is used for both encryption and decryption.
+
+### Step 5 — Finished (Client)
+
+The client sends a `Finished` handshake record, encrypted with the newly derived session keys. This is the first message protected by symmetric encryption.
+
+### Step 6 — ChangeCipherSpec + Finished (Server)
+
+The server sends its own `ChangeCipherSpec` record, agreeing to switch to symmetric encryption. It then sends its own `Finished` record. Once both sides have exchanged `Finished` records, the handshake is complete and encrypted application data transmission can begin.
+
+### Full Handshake Diagram
+
+```
 Client                          Server
   │                               │
-  │──── ClientHello ─────────────▶│        so first client will send a clientHello request, remember every going to server is First wrapped in Handshale message and that that Handshake message is wrapped IN TLSRecord this means that TLSRecord in parent Wrapper 
-  │◀─── ServerHello ──────────────│         now in response the server will send three records Back to Back wrapped in TLSRecord and every TLSRecord conains a messageType
-  │◀─── Certificate ──────────────│         and in second record the server will send the certificate and they certificate oontains server's public key and other root certificaet one more important thing to remember that every ertificate has a chain of certficates
-  │◀─── ServerHelloDone ──────────│         after this server will send another record of serverHelloDone saying that it's done now it's client time to send messages
-  │──── ClientKeyExchange ───────▶│        before moving on please see that how the struct(interface) of these ClientHello, ServerHello, and LTS record is looks, i have metioned these above so readers won't be confused
+  │──── ClientHello ─────────────▶│
+  │                               │
+  │◀─── ServerHello ──────────────│
+  │◀─── Certificate ──────────────│
+  │◀─── ServerHelloDone ──────────│
+  │                               │
+  │──── ClientKeyExchange ───────▶│
   │──── ChangeCipherSpec ────────▶│
   │──── Finished ────────────────▶│
+  │                               │
   │◀─── ChangeCipherSpec ─────────│
-  │◀─── Finished ─────────────────│ -->
-
-// The TLS record content types are:
-// 0x14 → ChangeCipherSpec  (its own type)
-// 0x15 → Alert
-// 0x16 → Handshake
-// 0x17 → ApplicationData
-// Only 0x16 records contain a HandshakeMessage wrapper inside
-
-
-Before understanding message TYPES, first understand HOW TLS sends Message Records. 
-<!-- TLSRecord
-    └── HandshakeMessage
-            └── ClientHello (actual body) -->
+  │◀─── Finished ─────────────────│
+  │                               │
+  │  [Encrypted Application Data] │
+```
