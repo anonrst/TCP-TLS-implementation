@@ -18,9 +18,6 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 1: Establish TCP Connection
 	// ═══════════════════════════════════════════════════════════════════════════
-	// TLS runs on top of TCP, so we first establish a reliable TCP connection
-	// to the server before starting the TLS handshake.
-
 	conn, err := net.Dial("tcp", "localhost:8000")
 	if err != nil {
 		fmt.Printf("TCP connection failed to setup\n")
@@ -31,28 +28,16 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 2: Build ClientHello Message
 	// ═══════════════════════════════════════════════════════════════════════════
-	// ClientHello is the first message in TLS handshake. It tells the server:
-	// - Which TLS version we support
-	// - Random data for key generation (prevents replay attacks)
-	// - Which cipher suites we support (encryption algorithms)
-	// - Compression methods (usually none in modern TLS)
-
-	// Generate 28 random bytes for the Random field
 	var randomBytes [28]byte
 	rand.Read(randomBytes[:])
 	
-	// Initialize SHA256 hash to track all handshake messages
-	// This hash will be used later to verify message integrity in the Finished message
 	handshakeHash := sha256.New()
 
-	// Build the Random structure: 4 bytes unix timestamp + 28 random bytes
-	// Total: 32 bytes of randomness to prevent replay attacks
 	random := RandomStruct{
 		unixTime:    uint32(time.Now().Unix()),
 		randomBytes: randomBytes,
 	}
 
-	// Construct the ClientHello message
 	clientHello := ClientHello{
 		protocolV:          ProtocolVersionV,                        // TLS 1.2
 		Random:             random,                                   // 32 bytes of randomness
@@ -64,15 +49,9 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 3: Wrap ClientHello in Handshake Protocol Layer
 	// ═══════════════════════════════════════════════════════════════════════════
-	// TLS has multiple protocol layers:
-	// 1. Handshake Protocol (contains ClientHello, ServerHello, etc.)
-	// 2. Record Protocol (wraps handshake messages for transmission)
-
 	clientHelloBytes := clientHello.serialize()
 	l := len(clientHelloBytes)
 
-	// Create HandshakeMessage with type 0x01 (ClientHello)
-	// Length is encoded as 3 bytes (24-bit big-endian)
 	handshakeMessage := HandshakeMessage{
 		MessageType: 0x01, // 0x01 = ClientHello
 		length:      [3]byte{byte(l >> 16), byte(l >> 8), byte(l)},
@@ -82,16 +61,11 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 4: Wrap Handshake Message in TLS Record Layer
 	// ═══════════════════════════════════════════════════════════════════════════
-	// The Record layer is the outermost layer that gets sent over TCP.
-	// It contains: ContentType, ProtocolVersion, Length, and Payload
 
 	handshakeBytes := handshakeMessage.serialize()
 	
-	// Add this handshake message to our running hash
-	// We hash the handshake message (not the TLS record wrapper)
 	handshakeHash.Write(handshakeBytes)
 	
-	// Create TLS Record with ContentType 0x16 (Handshake)
 	tlsRecord := TLSRecord{
 		contentType:   0x16, // 0x16 = Handshake
 		protocolV:     ProtocolVersionV,
@@ -106,11 +80,6 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 5: Read Server Response
 	// ═══════════════════════════════════════════════════════════════════════════
-	// The server will send back 3 TLS records in sequence:
-	// 1. ServerHello - server's chosen parameters
-	// 2. Certificate - server's public key certificate
-	// 3. ServerHelloDone - signals end of server's initial messages
-
 	responseBuffer := make([]byte, 4096)
 	_, err = conn.Read(responseBuffer)
 	if err != nil {
@@ -122,11 +91,6 @@ func main() {
 	// ───────────────────────────────────────────────────────────────────────────
 	// STEP 5.1: Parse ServerHello
 	// ───────────────────────────────────────────────────────────────────────────
-	// ServerHello contains:
-	// - Server's random data (for key derivation)
-	// - Chosen cipher suite (from our list)
-	// - Session ID (for session resumption)
-	// - Compression method
 
 	tlsRecord.parse(respReader)
 	handshakeMessage.parse(bytes.NewReader(tlsRecord.payload))
@@ -144,9 +108,6 @@ func main() {
 	// ───────────────────────────────────────────────────────────────────────────
 	// STEP 5.2: Parse Certificate
 	// ───────────────────────────────────────────────────────────────────────────
-	// Certificate message contains the server's X.509 certificate chain.
-	// We extract the server's RSA public key from the first certificate.
-	// This public key will be used to encrypt the premaster secret.
 
 	fmt.Println("\n← Receiving Certificate...")
 	tlsRecord.parse(respReader)
@@ -161,8 +122,6 @@ func main() {
 	// ───────────────────────────────────────────────────────────────────────────
 	// STEP 5.3: Parse ServerHelloDone
 	// ───────────────────────────────────────────────────────────────────────────
-	// ServerHelloDone is an empty message (no payload) that signals:
-	// "I'm done sending my initial messages, your turn to respond"
 
 	fmt.Println("\n← Receiving ServerHelloDone...")
 	tlsRecord.parse(respReader)
@@ -174,13 +133,6 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 6: Generate and Send ClientKeyExchange
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Now it's the client's turn to respond. We need to:
-	// 1. Generate a 48-byte premaster secret (random data)
-	// 2. Encrypt it with the server's public key (RSA)
-	// 3. Send it to the server in a ClientKeyExchange message
-	//
-	// Both client and server will use this premaster secret to derive the
-	// master secret and session keys for encrypting application data.
 
 	fmt.Println("\n→ Generating premaster secret...")
 	premasterKey := GeneratePremasterKey()
@@ -188,7 +140,6 @@ func main() {
 	fmt.Printf("  Premaster secret: 48 bytes\n")
 	fmt.Printf("  Encrypted with RSA: %d bytes\n", len(encryptedPremaster))
 	
-	// Build ClientKeyExchange message
 	clientKeyExchange := ClientKeyExchange{
 		encryptedPremasterLen: uint16(len(encryptedPremaster)),
 		encryptedPremaster:    encryptedPremaster,
@@ -224,14 +175,6 @@ func main() {
 	// They use it along with the random values exchanged earlier to derive:
 	// 1. Master Secret (48 bytes) - using PRF with label "master secret"
 	// 2. Key Block (136 bytes) - using PRF with label "key expansion"
-	//
-	// The Key Block is split into 6 keys:
-	// - clientWriteMAC (20 bytes) - HMAC key for client→server messages
-	// - serverWriteMAC (20 bytes) - HMAC key for server→client messages
-	// - clientWriteKey (32 bytes) - AES-256 key for client→server encryption
-	// - serverWriteKey (32 bytes) - AES-256 key for server→client encryption
-	// - clientWriteIV (16 bytes) - IV for client→server AES-CBC
-	// - serverWriteIV (16 bytes) - IV for server→client AES-CBC
 	
 	fmt.Println("\n→ Deriving master secret and session keys...")
 	
@@ -250,8 +193,6 @@ func main() {
 	masterSecret := PRF(premasterKey, "master secret", seed, 48)
 	fmt.Printf("  Master secret: 48 bytes\n")
 	
-	// Derive key block: PRF(master_secret, "key expansion", server_random + client_random)
-	// Note: For key expansion, the order is reversed (server_random first)
 	keyBlock := PRF(masterSecret, "key expansion", append(serverRandom, clientRandom...), 136)
 	fmt.Printf("  Key block: 136 bytes\n")
 
@@ -272,7 +213,6 @@ func main() {
 	// the server: "All future messages from me will be encrypted using the keys
 	// we just derived."
 	//
-	// Note: This has its own ContentType (0x14), not wrapped in Handshake (0x16)
 	
 	changeCipherSpecTLSRecord := TLSRecord{
 		contentType:   0x14, // 0x14 = ChangeCipherSpec (special content type)
@@ -288,15 +228,6 @@ func main() {
 	// ═══════════════════════════════════════════════════════════════════════════
 	// STEP 9: Send Finished Message
 	// ═══════════════════════════════════════════════════════════════════════════
-	// The Finished message proves to the server that:
-	// 1. We have the correct master secret
-	// 2. All handshake messages were received correctly (no tampering)
-	//
-	// It contains a 12-byte "verify_data" which is:
-	// PRF(master_secret, "client finished", SHA256(all_handshake_messages))
-	//
-	// In a real implementation, this message would be encrypted using the
-	// session keys we just derived. For simplicity, we're sending it unencrypted.
 	
 	handshakeDigest := handshakeHash.Sum(nil) // Get SHA256 hash of all handshake messages
 	verifyDataBytes := PRF(masterSecret, "client finished", handshakeDigest, 12)
