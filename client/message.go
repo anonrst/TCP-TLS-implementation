@@ -250,34 +250,3 @@ func PRF(secret []byte, label string, seed []byte, length int) []byte {
 	labelAndSeed := append([]byte(label), seed...)
 	return pSHA256(secret, labelAndSeed, length)
 }
-
-//
-// TLS 1.2 version
-// Client                          Server
-//   │                               │
-//   │──── ClientHello ─────────────▶│
-//   │◀─── ServerHello ──────────────│
-//   │◀─── Certificate ──────────────│
-//   │◀─── ServerHelloDone ──────────│
-//   │──── CljientKeyExchange ───────▶│
-//   │──── ChangeCipherSpec ────────▶│
-//   │──── Finished ────────────────▶│
-//   │◀─── ChangeCipherSpec ─────────│
-//   │◀─── Finished ─────────────────│
-
-
-// ClientHello       ContentType: 0x16  // Handshake
-// ServerHello       ContentType: 0x16  // Handshake
-// Certificate       ContentType: 0x16  // Handshake
-// ServerHelloDone   ContentType: 0x16  // Handshake
-// ClientKeyExchange ContentType: 0x16  // Handshake
-// ChangeCipherSpec  ContentType: 0x14  // ChangeCipherSpec — only one with different ContentType
-// Finished          ContentType: 0x16  // Handshake
-// ChangeCipherSpec  ContentType: 0x14  // ChangeCipherSpec
-// Finished          ContentType: 0x16  // Handshake
-
-
-// 0x14 = ChangeCipherSpec
-// 0x15 = Alert
-// 0x16 = Handshake
-// 0x17 = ApplicationData
