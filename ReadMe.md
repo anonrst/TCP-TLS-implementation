@@ -1,6 +1,37 @@
+# TCP 1.2 (Transport Control protocol)
+TCP is a connection-oriented protocol. Before any data is sent, it establishes a connection via a 3-way handshake. Its job is to deliver bytes in order, without loss, if a bytes goes missing, TCP resends it automatically using sequence numbers and acknowledgements. TCP provides none of its own encryption the data is readable to anyone on the path.
+
+```
+Client                          Server
+  │                               │
+  │──── SYN ────────────────────▶│
+  │                               │
+  │◀─── SYN-ACK ─────────────────│
+  │                               │
+  │──── ACK ────────────────────▶│
+  │                               │
+  │  [Connection Established]     │
+  │                               │
+  │──── Data ───────────────────▶│
+  │◀─── ACK ─────────────────────│
+  │                               │
+  │◀─── Data ────────────────────│
+  │──── ACK ────────────────────▶│
+  │                               │
+  │  [Connection Teardown]        │
+  │                               │
+  │──── FIN ────────────────────▶│
+  │◀─── ACK ─────────────────────│
+  │                               │
+  │◀─── FIN ─────────────────────│
+  │──── ACK ────────────────────▶│
+  │                               │
+  │  [Connection Closed]          │
+```
+
+
 # TLS 1.2 (Transport Layer Security)
 
-> This document covers a TLS 1.2 implementation.
 
 TLS is built on top of TCP. Its main purpose is to encrypt the raw data sent over TCP so that no one can read it during transmission. Its job is not to organize data packets — that is TCP's responsibility.
 
