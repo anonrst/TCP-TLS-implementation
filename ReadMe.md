@@ -36,6 +36,7 @@ Client                          Server
 TLS is built on top of TCP. Its main purpose is to encrypt the raw data sent over TCP so that no one can read it during transmission. Its job is not to organize data packets — that is TCP's responsibility.
 
 To establish a secure connection, TLS performs a series of handshakes between client and server. Every handshake message is wrapped inside a `HandshakeMessage`, and that `HandshakeMessage` is wrapped inside a `TLSRecord`. This makes `TLSRecord` the outermost wrapper of every request.
+
 ---
 
 ## Serialization
